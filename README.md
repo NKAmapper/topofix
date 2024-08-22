@@ -2,7 +2,7 @@
 Fix and add topo data to OSM in Norway
 ### Usage
 
-<code>python topofix.py [-overlap] [-mergeprop] [-merge] [-simplify] [-water] [-river] [-help]</code>
+<code>python topofix.py \<municipality\> [-overlap] [-mergeprop] [-merge] [-simplify] [-water] [-river] [-help]</code>
 
 
 ### Options ###
