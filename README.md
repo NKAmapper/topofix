@@ -68,8 +68,8 @@ The following arguments should be used in the described order, preferably one ar
    * Add **waterway** centerlines to **natural=water** + **water=river** relations, including connecting segments for streams across riverbanks.
 
    There are three alternative arguments for river centerlines:
-   * <code>-river</code> - Will add missing centerlines and connecting stream segments.
-   * <code>-lessriver</code> - Will add mising centerlines but not connecting stream segments.
+   * <code>-river</code> - Will add missing centerlines.
+   * <code>-extrariver</code> - Will add mising centerlines plus connecting stream segments.
    * <code>-allriver</code> - Will add all NVE centerlines (existing centerlines in OSM must be replaced) and connecting stream segments.
 
    Process for manual modifications:
