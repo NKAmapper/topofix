@@ -13,7 +13,7 @@ import os.path
 from xml.etree import ElementTree as ET
 
 
-version = "1.0.0"
+version = "1.0.1"
 
 header = {"User-Agent": "nkamapper/n50osm (github)"}
 
@@ -775,6 +775,9 @@ def delete_way (way):
 	way['action'] = "delete"
 	way['incomplete'] = True
 
+	if "topo" in way:
+		way['topo'] = set()
+
 	if "coordinates" in way:
 		del way['coordinates']
 
@@ -1021,8 +1024,6 @@ def check_grid(relation):
 # Create list of tagged objects which are closed/ring to prepare for later matching and merging
 
 def prepare_features ():
-
-#	features = []
 
 	# Get all ways which are closed rings
 
@@ -2649,7 +2650,7 @@ def split_streams():
 
 
 
-def get_nve_streams(add_all_centerlines=False, add_short_connections=True, nve_output_only=False):
+def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_output_only=False):
 
 	# Internal function to check if node is a three-way river junction
 
@@ -4405,7 +4406,7 @@ if __name__ == '__main__':
 
 	output_filename = "topofix_%s_%s.osm" % (municipality_id, municipality_name.replace(" ", "_"))
 
-	permitted_arguments = ["-overlap", "-mergeprep", "-merge", "-simplify", "-water", "-river", "-allriver", "-lessriver",
+	permitted_arguments = ["-overlap", "-mergeprep", "-merge", "-simplify", "-water", "-river", "-allriver", "-extrariver",
 							"-island", "-wikidata", "-debug", "-nve", "-elvis"]
 
 	for argument in sys.argv[2:]:
@@ -4466,13 +4467,13 @@ if __name__ == '__main__':
 	if "-wikidata" in sys.argv:
 		get_wikidata()
 
-	if "-river" in sys.argv or "-allriver" in sys.argv or "-noriver" in sys.argv:
+	if "-river" in sys.argv or "-allriver" in sys.argv or "-extrariver" in sys.argv:
 		split_streams()
 		get_river_names()
 		if "-allriver" in sys.argv:
-			get_nve_streams(add_all_centerlines=True)
-		elif "-lessriver" in sys.argv:
-			get_nve_streams(add_short_connections=False)
+			get_nve_streams(add_all_centerlines=True, add_short_connections=True)
+		elif "-extrariver" in sys.argv:
+			get_nve_streams(add_short_connections=True)
 		else:
 			get_nve_streams()
 
@@ -4480,4 +4481,3 @@ if __name__ == '__main__':
 
 	duration = time.time() - start_time
 	message ("\tTotal run time %s (%i ways per second)\n\n" % (timeformat(duration), int(len(ways) / duration)))
-
