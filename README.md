@@ -67,7 +67,7 @@ The following arguments should be used in the described order, preferably one ar
    * Match rivers/streams with NVE Elvenett river network model, turn direction of way if needed, and recombine river/stream segments into longer ways.
    * Add **waterway** centerlines to **natural=water** + **water=river** relations, including connecting segments for streams across riverbanks.
 
-   There are three alternative arguments for river centerlines:
+   There are four alternative arguments for river centerlines:
    * <code>-river</code> - Will add missing centerlines.
    * <code>-extrariver</code> - Will add mising centerlines plus connecting stream segments.
    * <code>-allriver</code> - Will add all NVE centerlines (existing centerlines in OSM must be replaced) and connecting stream segments.
