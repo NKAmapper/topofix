@@ -71,6 +71,7 @@ The following arguments should be used in the described order, preferably one ar
    * <code>-river</code> - Will add missing centerlines.
    * <code>-extrariver</code> - Will add mising centerlines plus connecting stream segments.
    * <code>-allriver</code> - Will add all NVE centerlines (existing centerlines in OSM must be replaced) and connecting stream segments.
+   * <code>-nameriver</code> - Only add names to rivers (no other modifications). 
 
    Process for manual modifications:
    * Search for <code>FIXME:swap</code> to swap proposed waterway centerlines with any existing centerlines. Use the To-do plugin. You may need to split and cocatenate segments in this step.
