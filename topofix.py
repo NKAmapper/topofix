@@ -13,7 +13,7 @@ import os.path
 from xml.etree import ElementTree as ET
 
 
-version = "1.0.2"
+version = "1.0.3"
 
 header = {"User-Agent": "nkamapper/n50osm (github)"}
 
@@ -2577,15 +2577,12 @@ def get_nve_lakes():
 			osm_lakes.append(osm_lake)
 
 	count = 0
-	display_limit = 2000
 
 	i = len(lakes) + 1
 	for nve_lake in lakes:
 
 		i -= 1
 		message ("\r\t%i " % i)
-		if len(nve_lake['coordinates']) > display_limit and nve_lake['name']:
-			message (nve_lake['name'] + " ")
 
 		tags = {}
 		for tag in ["ele", "ele:min", "ref:nve:vann", "ref:nve:magasin"]:
@@ -2597,7 +2594,7 @@ def get_nve_lakes():
 		best_hits = 0
 
 		for osm_lake in osm_lakes:
-			if (0.5 < abs(nve_lake['area'] / osm_lake['area']) < 1.5
+			if (0.3 < abs(nve_lake['area'] / osm_lake['area']) < 10
 					and nve_lake['min_bbox'][0] < osm_lake['max_bbox'][0] and nve_lake['max_bbox'][0] > osm_lake['min_bbox'][0]
 					and nve_lake['min_bbox'][1] < osm_lake['max_bbox'][1] and nve_lake['max_bbox'][1] > osm_lake['min_bbox'][1]):
 
@@ -2626,9 +2623,6 @@ def get_nve_lakes():
 				tags['name'] = nve_lake['name']
 			point = polygon_centroid(nve_lake['coordinates'])
 			create_point(point, tags)
-
-		if len(nve_lake['coordinates']) > display_limit:
-			message ("\r\t%s\r" % (" "*30))
 
 	message ("\r\tMatched %i OSM lakes and created %i nodes for non-matched lakes\n" % (count, len(lakes) - count))
 	message ("\tRun time %i seconds\n" % (time.time() - lap_time))
