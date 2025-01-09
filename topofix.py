@@ -13,7 +13,7 @@ import os.path
 from xml.etree import ElementTree as ET
 
 
-version = "1.0.3"
+version = "1.1.0"
 
 header = {"User-Agent": "nkamapper/n50osm (github)"}
 
@@ -26,6 +26,9 @@ min_lake_size = 1000000		# Minimum square meters for water=lake tag
 island_size = 100000  	 	# Minimum square meters for place=island vs place=islet
 max_node_match = 1000000 	# Maximum number of matches between nodes (used by Hausdorff and swap_nodes)
 grid_limit = 0.00001		# Maximum degrees deviation from 0.5 degree grids  - old: 0.000005
+centerline_limit = 5		# Maximum distance for matching river centerlines (meters)
+river_limit = 10 			# Maximum distance for matching rivers/streams (meters)
+large_river_limit = 20 		# Maximum distance for matching rivers/streams and centerlines (meter) if not matchcing short connections
 
 disregard_sources = ["Kartverket", "Landsat", "Bing", "Orthophoto", "NiB"]  # Do not merge source-tag containing these words
 
@@ -704,7 +707,7 @@ def get_topo_type(element):
 			else:
 				topo_type.add("river")
 		else:
-			topo_type.add(tags['natural'])	# Including coastline, oxbow
+			topo_type.add(tags['natural'])	# Including coastline, oxbow, glacier
 	if "landuse" in tags:
 		if tags['landuse'] == "forest":
 			topo_type.add("wood")
@@ -718,7 +721,7 @@ def get_topo_type(element):
 				topo_type.add("intermittent")  # "Tørrfall"
 			else:
 				topo_type.add("river")
-		elif element['type'] == "way" and "tunnel" not in tags:
+		elif element['type'] == "way":  # and "tunnel" not in tags:
 			if tags['waterway'] in ["river", "stream", "ditch", "canal"]:
 				topo_type.add("stream")
 			else:
@@ -832,6 +835,7 @@ def load_osm_overpass():
 					'nwr["aeroway"](area.a);'
 					'nwr["man_made"](area.a);'
 					'nwr["piste:type"="downhill"](area.a);'
+					'nwr["amenity"="grave_yard"](area.a);'
 					'nwr["seamark:type"="rock"](area.a);'
 					'nwr["place"="island"](area.a);'
 					'nwr["place"="islet"](area.a);'
@@ -969,7 +973,7 @@ def prepare_data ():
 	for relation in elements:
 		if relation['type'] == "relation" and not ("action" in relation and relation['action'] == "delete"):
 
-			island = "place" in relation['tags'] and relation['tags']['place'] in ["islet", "island"]  # Identify relations which are islands
+#			island = "place" in relation['tags'] and relation['tags']['place'] in ["islet", "island"]  # Identify relations which are islands
 			incomplete = False
 			members = []
 
@@ -991,7 +995,7 @@ def prepare_data ():
 				relation['incomplete'] = incomplete
 				relation['member_list'] = members
 				if incomplete:
-					relation['topo'] = get_topo_type(relation)
+					relation['topo'] = set()  # get_topo_type(relation)
 				else:
 					relation['topo'] = get_topo_type(relation)
 
@@ -1382,31 +1386,32 @@ def fix_overlapping_ways ():
 
 def swap_ways(way1, way2):
 
-	# Merge end nodes
+	# Merge end nodes, unless closed way
 
-	if distance(way1['coordinates'][0][0], way2['coordinates'][0][0]) < distance(way1['coordinates'][0][0], way2['coordinates'][0][-1]):
-		swaps = [(0, 0), (-1,-1)]
-	else:
-		swaps = [(0, -1), (-1, 0)]
+	if way1['nodes'][0] != way1['nodes'][-1]:
+		if distance(way1['coordinates'][0][0], way2['coordinates'][0][0]) < distance(way1['coordinates'][0][0], way2['coordinates'][0][-1]):
+			swaps = [(0, 0), (-1,-1)]
+		else:
+			swaps = [(0, -1), (-1, 0)]
 
-	for from_index, to_index in swaps:
-		from_node = nodes[ way2['nodes'][ from_index ] ]
-		to_node = nodes[ way1['nodes'][ to_index ] ]
-		if from_node != to_node:
+		for from_index, to_index in swaps:
+			from_node = nodes[ way2['nodes'][ from_index ] ]
+			to_node = nodes[ way1['nodes'][ to_index ] ]
+			if from_node != to_node:
 
-			for way_parent_id in from_node['parents']:
-				way_parent = ways[ way_parent_id ]
-				for j, node_id in enumerate(way_parent['nodes']):
-					if node_id == from_node['id']:
-						way_parent['nodes'][ j ] = to_node['id']
-						way_parent['action'] = "modify"
+				for way_parent_id in from_node['parents']:
+					way_parent = ways[ way_parent_id ]
+					for j, node_id in enumerate(way_parent['nodes']):
+						if node_id == from_node['id']:
+							way_parent['nodes'][ j ] = to_node['id']
+							way_parent['action'] = "modify"
 
-			from_node['action'] = "delete"
-			from_node['parents'] = set()
-			to_node['parents'].add(way2['id'])
+				from_node['action'] = "delete"
+				from_node['parents'] = set()
+				to_node['parents'].add(way2['id'])
 
-			way2['nodes'][ from_index ] = way1['nodes'][ to_index ]
-			way2['coordinates'][0][ from_index ] = way1['coordinates'][0][ to_index ]
+				way2['nodes'][ from_index ] = way1['nodes'][ to_index ]
+				way2['coordinates'][0][ from_index ] = way1['coordinates'][0][ to_index ]
 
 	# Delete way2 and middle nodes
 
@@ -1431,26 +1436,27 @@ def swap_ways(way1, way2):
 
 	# Check if any remaining void ways due to node relocation
 
-	for end in [0, -1]:
-		for way_id in list(nodes[ way1['nodes'][ end ] ]['parents']):
-			way = ways[ way_id ]
-			if way != way1 and len(way['nodes']) == 2 and way['nodes'][0] == way['nodes'][-1]:
-				delete_way(way)
+	if way1['nodes'][0] != way1['nodes'][-1]:
+		for end in [0, -1]:
+			for way_id in list(nodes[ way1['nodes'][ end ] ]['parents']):
+				way = ways[ way_id ]
+				if way != way1 and len(way['nodes']) == 2 and way['nodes'][0] == way['nodes'][-1]:
+					delete_way(way)
 
-				for relation_id in way['parents']:
-					relation = relations[ relation_id ]
-					for member in relation['members'][:]:
-						if member['ref'] == way['id']:
-							relation['members'].remove(member)
-							relation['action'] = "modify"
+					for relation_id in way['parents']:
+						relation = relations[ relation_id ]
+						for member in relation['members'][:]:
+							if member['ref'] == way['id']:
+								relation['members'].remove(member)
+								relation['action'] = "modify"
 
-					if "member_patches" in relation:  # Incomplete relations may not have patches
-						for patch in relation['member_patches'][:]:
-							for member in patch[:]:
-								if member['ref'] == way['id']:
-									patch.remove(member)
-							if not patch:
-								relation['member_patches'].remove(patch)
+						if "member_patches" in relation:  # Incomplete relations may not have patches
+							for patch in relation['member_patches'][:]:
+								for member in patch[:]:
+									if member['ref'] == way['id']:
+										patch.remove(member)
+								if not patch:
+									relation['member_patches'].remove(patch)
 
 
 
@@ -1481,7 +1487,8 @@ def identify_touching_relations(merge_grids=False):
 				if (relation1['incomplete'] and relation2['incomplete']
 						or not merge_grids and (relation1['incomplete'] or relation2['incomplete'])
 						or relation1['topo'] != relation2['topo']
-						or not any(topo in relation1['topo'] for topo in ["water", "river", "wetland", "landuse", "wood"])):
+						or not any(topo in relation1['topo'] for topo in ["water", "river", "wetland", "wood", "glacier",
+																			"residential", "industrial", "retail", "farmland", "quarry"])):
 					continue
 
 				# Avoid merging wood grids
@@ -2126,12 +2133,13 @@ def create_islands():
 			if combination_coordinates[0] == combination_coordinates[-1]:
 
 				# First avoid outer perimeter of lake/river being selected
+				# Note: Test is only partial if a parent relation is incomplete
 
 				area = abs(polygon_area(combination_coordinates))
 				all_parents = set()
 				for way in combination_ways:
 					for parent_id in way['parents']:
-						if relations[ parent_id ]['topo'] & set(["water", "river", "intermittent"]):
+						if relations[ parent_id ]['topo'] & set(["water", "river", "intermittent"]) and not relations[ parent_id ]['incomplete']:
 							all_parents.add(parent_id)
 				area_parents = sum(abs(polygon_area(relations[ parent_id ]['coordinates'][0])) for parent_id in all_parents)
 				if all_parents and area + 5 > area_parents:
@@ -2292,9 +2300,9 @@ def create_islands():
 								'type': 'relation',
 								'id': new_id(),
 								'members': members,
+								'member_patches': [ members ],
 								'tags': tags,
 								'coordinates': [ lake['coordinates'][i] ],
-								'member_patches': [ members ],
 								'topo': set(["island"]),
 								'area': area,
 								'incomplete': False
@@ -2314,7 +2322,7 @@ def create_islands():
 
 	coastlines = []
 	for coastline in ways.values():
-		if "coastline" in coastline['topo'] and not coastline['incomplete']:
+		if "coastline" in coastline['topo'] and "coordinates" in coastline and not coastline['incomplete']:
 
 			# Check if way is circular
 			if coastline['nodes'][0] == coastline['nodes'][-1]:
@@ -2503,8 +2511,8 @@ def get_nve_lakes():
 			min_bbox, max_bbox = get_bbox(coordinates)
 
 			info = feature['attributes']
-			if info['magasinNr'] is not None and info['magasinNr'] in reservoirs:
-				lake.update(reservoirs[ info['magasinNr'] ])
+	#		if info['magasinNr'] is not None and info['magasinNr'] in reservoirs:
+	#			lake.update(reservoirs[ info['magasinNr'] ])
 
 			lake = {
 				'name': info['navn'],
@@ -2577,12 +2585,15 @@ def get_nve_lakes():
 			osm_lakes.append(osm_lake)
 
 	count = 0
+#	display_limit = 2000
 
 	i = len(lakes) + 1
 	for nve_lake in lakes:
 
 		i -= 1
 		message ("\r\t%i " % i)
+#		if len(nve_lake['coordinates']) > display_limit and nve_lake['name']:
+#			message (nve_lake['name'] + " ")
 
 		tags = {}
 		for tag in ["ele", "ele:min", "ref:nve:vann", "ref:nve:magasin"]:
@@ -2604,6 +2615,7 @@ def get_nve_lakes():
 					best_hits = hits
 					best_lake = osm_lake
 					best_hausdorff = hausdorff
+					best_size = abs(nve_lake['area'] / osm_lake['area'])
 
 		# March if 50% of NVE nodes have hits within 50 meters
 
@@ -2623,6 +2635,9 @@ def get_nve_lakes():
 				tags['name'] = nve_lake['name']
 			point = polygon_centroid(nve_lake['coordinates'])
 			create_point(point, tags)
+
+#		if len(nve_lake['coordinates']) > display_limit:
+#			message ("\r\t%s\r" % (" "*30))
 
 	message ("\r\tMatched %i OSM lakes and created %i nodes for non-matched lakes\n" % (count, len(lakes) - count))
 	message ("\tRun time %i seconds\n" % (time.time() - lap_time))
@@ -2721,7 +2736,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 				if parent in ways and "waterway" in ways[ parent ]['tags'] and ways[ parent ]['tags']['waterway'] in ["river", "canal"]:
 					count += 1
 			if count > 2:
-				message ("3-way junction: %s\n" % node_id)
+				message ("*** 3-way junction: %s\n" % node_id)
 				return True
 			else:
 				return False
@@ -2741,6 +2756,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 	# Load rivers (paged)
 
 	nve_rivers = []  # Geojson features for output of all rivers inside bbox
+	nve_rivers_id = set() # Used to avoid duplicates
 	nve_river_count = 0
 	more_rivers = True
 
@@ -2763,6 +2779,10 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 		# Loop river segments and store
 
 		for river in river_data['features']:
+			# Avoid duplicates
+			if river['attributes']['strekningLnr'] is not None and int(river['attributes']['strekningLnr']) in nve_rivers_id:
+				continue
+
 			# Add OSM tags
 			if river['attributes']['objektType'] not in ["InnsjøMidtlinje", "InnsjøMidtlinjeReg", "ElvelinjeFiktiv"]:
 				if "elvenavn" in river['attributes'] and river['attributes']['elvenavn'] and river['attributes']['elvenavn'].strip():
@@ -2782,9 +2802,12 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 					message ("*** Path match 2\n")
 				else:
 					message ("*** No path match\n")
+
 			river['geometry']['paths'] = coordinates
 			river['min_bbox'], river['max_bbox'] = get_bbox(coordinates)
 			nve_rivers.append(river)
+			if river['attributes']['strekningLnr'] is not None:
+				nve_rivers_id.add(int(river['attributes']['strekningLnr']))
 
 		nve_river_count += len(river_data['features'])
 		message ("\r\t%i " % nve_river_count)
@@ -2792,7 +2815,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 		if 'exceededTransferLimit' not in river_data:
 			more_rivers = False
 
-	message ("\r\tLoaded %i river/stream segments in bounding box from NVE\n" % nve_river_count)
+	message ("\r\tLoaded %i river/stream segments in bounding box from NVE\n" % len(nve_rivers))
 
 
 	# Pass 2: Output Elvis geojson
@@ -2906,7 +2929,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 							if (river['min_bbox'][0] <= river2['max_bbox'][0] and river['max_bbox'][0] >= river2['min_bbox'][0]
 									and river['min_bbox'][1] <= river2['max_bbox'][1] and river['max_bbox'][1] >= river2['min_bbox'][1]):
 
-								hits = hausdorff_distance(coordinates, river2['coordinates'][0], limit=10, hits=True)
+								hits = hausdorff_distance(coordinates, river2['coordinates'][0], limit=centerline_limit, hits=True)  # limit=5
 								if len(hits) > 0.6 * len(coordinates):
 									inside = False  # Do not add NVE centerline
 									break
@@ -3022,7 +3045,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 				if (river1['min_bbox'][0] <= river2['max_bbox'][0] and river1['max_bbox'][0] >= river2['min_bbox'][0]
 						and river1['min_bbox'][1] <= river2['max_bbox'][1] and river1['max_bbox'][1] >= river2['min_bbox'][1]):
 
-					hits = hausdorff_distance(river1['coordinates'][0], river2['geometry']['paths'], limit=5, hits=True)
+					hits = hausdorff_distance(river1['coordinates'][0], river2['geometry']['paths'], limit=river_limit, hits=True)  # limit=10
 					if len(hits) > 1:
 						all_hits.update(set(hits))
 						if len(hits) > best_hits:
@@ -3165,7 +3188,7 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 				for river in osm_rivers[:]:
 					if (river['elvis'] == combination['elvis']
 							and river['tags']['waterway'] == combination_tags['waterway']
-							and (("tunnel" in river['tags']) == ("tunnel" in combination_tags))
+#							and (("tunnel" in river['tags']) == ("tunnel" in combination_tags))
 							and not ("name" in river['tags'] and "name" in combination_tags and combination_tags['name'] != river['tags']['name'])
 							and not ("ssr:stedsnr" in river['tags'] and "ssr:stedsnr" in combination_tags and combination_tags['ssr:stedsnr'] != river['tags']['ssr:stedsnr'])
 							and not ("FIXME" in river['tags'] and "name" in combination_tags)
@@ -3205,10 +3228,11 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 				combined_river['action'] = "modify"
 
 				for river in combination_rivers:
+					# River and canal tagging overrides other waterway values
 					if combined_river['tags']['waterway'] == "river" or river['tags']['waterway'] == "river":
 						combined_river['tags']['waterway'] = "river"
 					elif combined_river['tags']['waterway'] == "canal" or river['tags']['waterway'] == "canal":
-						combined_river['tags']['waterway'] = "canal"							
+						combined_river['tags']['waterway'] = "canal"
 
 					# Move nodes to combined river
 					for node in river['nodes']:
@@ -3218,6 +3242,12 @@ def get_nve_streams(add_all_centerlines=False, add_short_connections=False, nve_
 
 					merge_tags(combined_river, river['tags'], overwrite=False)
 					delete_way(river)
+
+				# Remove tunnel/layer tags
+				for key in ["tunnel", "layer"]:
+					if key in combined_river['tags']:
+						combined_river['tags'][ "OSM_" + key ] = combined_river['tags'][ key ]
+						del combined_river['tags'][ key ]
 
 				count_segments += len(combination_rivers)
 				count_combine += 1
@@ -3709,7 +3739,8 @@ def get_ssr_name (feature, name_categories):
 			alt_names.append("%s [NVE]" % feature['nve_name'])
 
 		# Use N100 rank if present
-		if any(["N100" in place['tags'] for place in found_places]):
+		if ("N100" in found_places[0]['tags']
+				or any(["N100" in place['tags'] and "gruppe" not in place['tags']['ssr:type'] for place in found_places])):
 			n100_places = [place for place in found_places if "N100" in place['tags']]
 			new_tags = copy.deepcopy(n100_places[0]['tags'])
 
@@ -4070,18 +4101,18 @@ def get_wikidata():
 	message ("Loading wikidata for lakes ...\n")
 
 	query = '''
-	SELECT ?item ?label ?ssr ?nveid ?gnsid ?geonamesid ?loc ?forekomstLabel ?article ## Kan byttes ut med * for å få alle data
+	SELECT ?item ?label ?ssr ?nveid ?gnsid ?geonamesid ?loc ?forekomstLabel ?article ## Use * finstead to get all data
 	{
 		{
 			SELECT distinct * {
-				{ ?item wdt:P31/wdt:P279* wd:Q23397. } ## Søker her etter innsjø (Q23397) og alt som er underklasser (rekursivt) av innsjø
+				{ ?item wdt:P31/wdt:P279* wd:Q23397. } ## Searching for lake (Q23397) and all subclasses (recursively) of lake
 				UNION
 				{ ?item wdt:P31/wdt:P279* wd:Q131681. }
 				UNION
 				{ ?item wdt:P31/wdt:P279* wd:Q3253281. }
 #				?item wdt:P31 ?forekomst.
-				?item wdt:P131 ?kommune. ## Ligger i en kommune
-				?kommune wdt:P2504 "%s". ## Denne kommunen har norsk kommunenr som skal være det som er gitt som en streng
+				?item wdt:P131 ?kommune. ## Is in a municipality
+				?kommune wdt:P2504 "%s". ## This unicipality has Norwegian municipality identifier which is given as a string
 				optional {
 					?item wdt:P5079 ?nveid . # NVE Innsjødatabase-ID (P5079)
 				}
@@ -4089,17 +4120,17 @@ def get_wikidata():
 					?item wdt:P2326 ?gnsid . # GNS-ID (P2326)
 				}
 				optional {
-					?item wdt:P1566 ?geonamesid . # GeoNames-identifikator (P1566)
+					?item wdt:P1566 ?geonamesid . # GeoNames identifier (P1566)
 				}
 				optional {
-					?item wdt:P625 ?loc . # Geografisk posisjon 
+					?item wdt:P625 ?loc . # Geographical position 
 				}
 				optional {
-					?item  wdt:P1850 ?ssr. # SSR stedsnummer (P1850)
+					?item  wdt:P1850 ?ssr. # SSR place identifier (P1850)
 				}
 				optional {
-					?article schema:about ?item.   # artikkel 
-					?article schema:isPartOf <https://no.wikipedia.org/>. # Begrenset til no.wikipedia
+					?article schema:about ?item.   # article 
+					?article schema:isPartOf <https://no.wikipedia.org/>. # Limited to no.wikipedia
 				} 
 			} LIMIT 1000 
 		}
@@ -4484,7 +4515,7 @@ if __name__ == '__main__':
 		input_filename = sys.argv[2]
 	else:
 		input_filename = ""
-		if "-merge" in sys.argv and "-mergeprep" not in sys.argv and "-file" not in sys.argv:
+		if "-merge" in sys.argv and "-mergeprep" not in sys.argv:
 			input_filename = output_filename.replace(".osm", "") + "_merge.osm"
 			if not os.path.isfile(input_filename):
 				sys.exit("Please provide OSM filename with FIXME=Merge/Split tags\n")
@@ -4496,7 +4527,7 @@ if __name__ == '__main__':
 							"-island", "-wikidata", "-debug", "-nve", "-elvis"]
 
 	for argument in sys.argv[2:]:
-		if ".osm" not in argument and argument not in permitted_arguments:
+		if ".osm" not in argument and argument not in permitted_arguments and not argument.isdigit():
 			if argument != "-help":
 				message ("Did not recognize '%s'.\n" % argument)
 			sys.exit ("Permitted arguments:\n\t%s\n" % (", ".join(permitted_arguments)))
@@ -4553,16 +4584,21 @@ if __name__ == '__main__':
 	if "-wikidata" in sys.argv:
 		get_wikidata()
 
-	if "-nameriver" in sys.argv:
-		get_river_names()
-	elif "-river" in sys.argv or "-allriver" in sys.argv or "-extrariver" in sys.argv:
-		split_streams()
+	if "-river" in sys.argv or "-allriver" in sys.argv or "-extrariver" in sys.argv or "-nameriver" in sys.argv:
+		if "-nameriver" not in sys.argv:
+			split_streams()
 		get_river_names()
 		if "-allriver" in sys.argv:
 			get_nve_streams(add_all_centerlines=True, add_short_connections=True)
 		elif "-extrariver" in sys.argv:
 			get_nve_streams(add_short_connections=True)
 		else:
+			if sys.argv[-1].isdigit():
+				river_limit = int(sys.argv[-1])
+				centerline_limit = river_limit
+			else:
+				river_limit = large_river_limit
+				centerline_limit = large_river_limit
 			get_nve_streams()
 
 	save_file(output_filename, elements)
